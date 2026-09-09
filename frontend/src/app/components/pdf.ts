@@ -1,0 +1,18 @@
+import { Component, ChangeDetectorRef, inject, ElementRef, Input, OnChanges, OnDestroy, ViewChild } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import * as pdfjs from 'pdfjs-dist';
+pdfjs.GlobalWorkerOptions.workerSrc=new URL('assets/pdf.worker.min.mjs',document.baseURI).href;
+@Component({selector:'pdf-view',standalone:true,imports:[FormsModule],template:`<div class="toolrow"><button (click)="go(-1)" [disabled]="page<=1">‹</button><label>Page <input aria-label="Page PDF" type="number" [ngModel]="page" (ngModelChange)="setPage($event)" [min]="1" [max]="pages"></label><span>/ {{pages}}</span><button (click)="go(1)" [disabled]="page>=pages">›</button><button (click)="zoom(.8)">−</button><button (click)="zoom(1.25)">+</button><button (click)="fit()">Largeur</button><button (click)="rotate()">↻</button><button (click)="fullscreen()" aria-label="Plein écran PDF">⛶</button></div><div class="pdf-error" role="status">{{error}}</div><div #viewport class="pdf-scroll"><canvas #canvas aria-label="Page du PDF original"></canvas></div>`,styles:[`:host{display:flex;flex-direction:column;height:100%;min-height:0}.pdf-scroll{overflow:auto;background:#e8edf4;flex:1;padding:16px;min-height:400px}.pdf-scroll canvas{display:block;background:white;box-shadow:0 2px 9px #273e6220;max-width:none}.toolrow input{width:42px;padding:3px}.toolrow label{font-size:11px}.pdf-error{color:#a82c35;font-size:12px}`]})
+export class PdfComponent implements OnChanges,OnDestroy {
+ @Input() blob?:Blob;@ViewChild('canvas',{static:true})canvas!:ElementRef<HTMLCanvasElement>;@ViewChild('viewport',{static:true})viewport!:ElementRef<HTMLDivElement>;
+ private cdr=inject(ChangeDetectorRef);page=1;pages=0;scale=1;angle=0;error='';private pdf?:pdfjs.PDFDocumentProxy;private task?:pdfjs.RenderTask;private generation=0;private renderVersion=0;
+ async ngOnChanges(){const gen=++this.generation;this.task?.cancel();await this.pdf?.destroy();this.pdf=undefined;this.page=1;this.pages=0;this.error='';if(!this.blob)return;
+  try{const bytes=await this.blob.arrayBuffer();const doc=await pdfjs.getDocument({data:bytes}).promise;if(gen!==this.generation){await doc.destroy();return;}this.pdf=doc;this.pages=doc.numPages;this.cdr.markForCheck();await this.fit();}catch(e){if(gen===this.generation)this.error=`Lecture PDF impossible : ${String(e)}`;this.cdr.markForCheck();}
+ }
+ async render(){if(!this.pdf)return;const v=++this.renderVersion;this.task?.cancel();try{const p=await this.pdf.getPage(this.page);if(v!==this.renderVersion)return;const viewport=p.getViewport({scale:this.scale,rotation:this.angle});const c=this.canvas.nativeElement;c.width=viewport.width;c.height=viewport.height;this.task=p.render({canvas:c,viewport});await this.task.promise;this.error='';}catch(e:any){if(e?.name!=='RenderingCancelledException')this.error=String(e);}}
+ async fit(){if(!this.pdf)return;const p=await this.pdf.getPage(this.page);this.scale=Math.min(3,Math.max(.2,(this.viewport.nativeElement.clientWidth-32)/p.getViewport({scale:1,rotation:this.angle}).width));await this.render();}
+ go(delta:number){this.setPage(this.page+delta);}setPage(n:number){if(!Number.isInteger(n)||n<1||n>this.pages)return;this.page=n;void this.render();}
+ zoom(f:number){this.scale=Math.max(.2,Math.min(4,this.scale*f));void this.render();}rotate(){this.angle=(this.angle+90)%360;void this.render();}
+ fullscreen(){this.viewport.nativeElement.requestFullscreen?.();}png(){return this.pages?this.canvas.nativeElement.toDataURL('image/png'):undefined;}
+ ngOnDestroy(){++this.generation;++this.renderVersion;this.task?.cancel();void this.pdf?.destroy();}
+}

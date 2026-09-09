@@ -1,0 +1,68 @@
+import { Component, ChangeDetectorRef, ViewChild, computed, inject, signal, HostListener } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { Store } from './store';
+import { categories, clone, DocumentRecord, Difference, Graph, Key, Status, addRevision, applyDifference, compareGraphs, demoGraph, makeDocument, parseGraph, referenceMetrics, trainingRows } from './domain';
+import { DiagramComponent } from './components/diagram';
+import { EditorComponent } from './components/editor';
+import { PdfComponent } from './components/pdf';
+import { batchExport, datasetExport, demoPdf, download, reportData, reportPdf } from './exports';
+@Component({selector:'app-root',standalone:true,imports:[CommonModule,FormsModule,DiagramComponent,EditorComponent,PdfComponent],templateUrl:'./app.html'})
+export class AppComponent {
+ cdr=inject(ChangeDetectorRef);store=inject(Store);page='workspace';layout='triple';activeId=signal('');selected=signal<{key:Key,type:'node'|'link'}|null>(null);
+ current=computed(()=>this.store.documents().find(d=>d.id===this.activeId()));
+ graph=computed(()=>this.current()?.corrected);editorText=computed(()=>this.graph()?JSON.stringify(this.graph(),null,2):'');
+ selectedObject=computed(()=>{const s=this.selected(),g=this.graph();return !s||!g?null:(s.type==='node'?g.nodeDataArray:g.linkDataArray).find(x=>x.key===s.key)??null;});
+ totals=computed(()=>{const a=this.store.documents();return {documents:a.length,pdf:a.filter(d=>d.pdf).length,json:a.filter(d=>d.original).length,valid:a.filter(d=>d.status==='valid').length,nodes:a.reduce((s,d)=>s+(d.corrected?.nodeDataArray.length??0),0),links:a.reduce((s,d)=>s+(d.corrected?.linkDataArray.length??0),0),corrections:a.flatMap(trainingRows).length};});
+ nav=[['dashboard','▦','Dashboard'],['workspace','◇','Workspace'],['batch','▤','Traitement batch'],['reports','▧','Rapports'],['dataset','▥','Dataset ML'],['metrics','▥','Statistiques'],['settings','⚙','Paramètres']];
+ statusList:Status[]=['valid','partial','invalid','review'];
+ statuses:Record<Status,string>={review:'À revoir',valid:'Valide',partial:'Partiel',invalid:'Invalide'};
+ busy=false;message='';errors:string[]=[];ids=true;highlights=true;dirty=false;search='';filter='all';exportFormat='jsonl';pairTarget='';pairSource='';ratio=33;reportScope='individual';
+ settings=clone(this.store.settings());dialog=false;editingId:string|null=null;diff:Difference=this.blankDiff();expectedText='';idText='';applyNow=true;
+ categories=categories;categoryNames=Object.keys(categories);
+ @ViewChild(DiagramComponent)diagram?:DiagramComponent;@ViewChild(EditorComponent)editor?:EditorComponent;@ViewChild(PdfComponent)pdf?:PdfComponent;
+ constructor(){void this.run(async()=>{await this.store.load();this.settings=clone(this.store.settings());this.activeId.set(this.store.documents()[0]?.id??'');});}
+ @HostListener('window:beforeunload',['$event'])beforeUnload(e:BeforeUnloadEvent){if(this.dirty){e.preventDefault();e.returnValue='';}}
+ @HostListener('document:keydown',['$event'])shortcut(e:KeyboardEvent){if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();this.editor?.apply();}}
+ async run(fn:()=>Promise<void>){if(this.busy)return;this.busy=true;this.errors=[];try{await fn();}catch(e){this.errors=[e instanceof Error?e.message:String(e)];}finally{this.busy=false;this.cdr.markForCheck();}}
+ navigate(page:string){if(this.dirty&&!confirm('Le JSON modifié n’est pas appliqué. Abandonner ces modifications ?'))return;this.dirty=false;this.page=page;}
+ open(id:string){if(this.dirty&&!confirm('Abandonner les modifications JSON non appliquées ?'))return;this.dirty=false;this.activeId.set(id);this.selected.set(null);this.page='workspace';}
+ async importInput(event:Event){const input=event.target as HTMLInputElement;const files=Array.from(input.files??[]);input.value='';await this.importFiles(files);}
+ async importFiles(files:File[]){await this.run(async()=>{this.errors=await this.store.import(files);this.activeId.set(this.current()?.id??this.store.documents()[0]?.id??'');this.message=`Import terminé : ${this.store.documents().length} documents. Les originaux existants sont conservés.`;});}
+ drop(e:DragEvent){e.preventDefault();void this.importFiles(Array.from(e.dataTransfer?.files??[]));}
+ async demo(){await this.run(async()=>{if(this.store.documents().length>=50)throw Error('Limite de 50 documents atteinte.');const d=makeDocument('Exemple pompe',this.store.settings());d.original=clone(demoGraph);d.corrected=clone(demoGraph);d.rawOriginal=JSON.stringify(demoGraph,null,2);d.jsonName='pump.json';d.pdfName='pump.pdf';d.pdf=demoPdf(demoGraph);d.reference=clone(demoGraph);d.reference.nodeDataArray.find(n=>n.key==='N17')!.text='Pump Failure';d.differences=compareGraphs(d.original,d.reference);await this.store.put(d);this.activeId.set(d.id);this.page='workspace';this.message='Exemple chargé. Sélectionnez N17 pour corriger le texte OCR.';});}
+ async applyText(text:string){await this.run(async()=>{const d=this.current();if(!d)return;const graph=parseGraph(text);await this.store.put(addRevision(d,graph,this.store.settings().validator,'Modification JSON'));this.dirty=false;this.message='JSON appliqué ; prédiction originale conservée.';});}
+ async graphChanged(g:Graph){if(this.busy)return;await this.run(async()=>{const d=this.current();if(!d)return;await this.store.put(addRevision(d,parseGraph(JSON.stringify(g)),this.store.settings().validator,'Déplacement / modification GoJS'));this.message='Diagramme enregistré dans une nouvelle version.';});}
+ async setStatus(s:Status){await this.run(async()=>{const d=this.current();if(!d?.original||!d.pdf)throw Error('Associez un PDF et un JSON avant validation.');if(this.dirty)throw Error('Appliquez les modifications JSON avant validation.');if(s==='valid'&&d.differences.some(x=>!x.validated))throw Error('Il reste des écarts ouverts. Corrigez-les avant de marquer le document valide.');await this.store.put({...d,status:s,updatedAt:new Date().toISOString()});this.message='Statut enregistré : '+this.statuses[s];});}
+ selectObject(s:{key:Key,type:'node'|'link'}){this.selected.set(s);}
+ findObject(){const g=this.graph();if(!g)return;const n=g.nodeDataArray.find(n=>String(n.key)===this.search||String(n.text??'').toLowerCase().includes(this.search.toLowerCase()));if(n){this.selected.set({key:n.key,type:'node'});this.message='Objet sélectionné : '+n.key;}else this.message='Aucun nœud correspondant.';}
+ differences(){return (this.current()?.differences??[]).filter(x=>this.filter==='all'||x.category===this.filter);}
+ blankDiff():Difference{return {id:crypto.randomUUID(),page:1,element_id:'',element_type:'node',category:'ocr',error_type:'wrong_text',property:'text',predicted_value:null,expected_value:'',confidence:null,validated:false,comment:'',source:'human',created_at:new Date().toISOString()};}
+ addDiff(){if(!this.current()?.corrected)return;this.diff=this.blankDiff();this.editingId=null;const s=this.selected();if(s){this.diff.element_id=s.key;this.diff.element_type=s.type;}this.diff.page=this.pdf?.page??1;this.idText=String(this.diff.element_id);this.expectedText='';this.applyNow=true;this.dialog=true;}
+ editDiff(d:Difference){this.diff=clone(d);this.editingId=d.id;this.idText=String(d.element_id);this.expectedText=typeof d.expected_value==='string'?d.expected_value:JSON.stringify(d.expected_value,null,2);this.applyNow=true;this.dialog=true;this.selected.set({key:d.element_id,type:d.element_type});}
+ changeCategory(){this.diff.error_type=this.categories[this.diff.category][0];this.changeType();}
+ changeType(){const t=this.diff.error_type;this.diff.element_type=this.diff.category==='link'?'link':this.diff.element_type;this.diff.property=t.startsWith('missing_node')||t.startsWith('extra_node')||t.startsWith('missing_link')||t.startsWith('extra_link')?'$object':({wrong_text:'text',missing_text:'text',wrong_position:'loc',wrong_size:'size',wrong_target:'to',wrong_source:'from',wrong_rotation:'angle',wrong_shape:'figure',wrong_routing:'points'} as any)[t]??'text';}
+ async saveDiff(){await this.run(async()=>{const d=this.current();if(!d?.corrected)return;if(!this.idText.trim())throw Error('Renseignez l’identifiant de l’objet.');if(!Number.isInteger(this.diff.page)||this.diff.page<1||this.pdf&&this.pdf.pages>0&&this.diff.page>this.pdf.pages)throw Error('Page PDF invalide.');if(this.diff.confidence!==null&&(!Number.isFinite(this.diff.confidence)||this.diff.confidence<0||this.diff.confidence>1))throw Error('La confiance doit être entre 0 et 1, ou vide.');
+  const array=this.diff.element_type==='node'?d.corrected.nodeDataArray:d.corrected.linkDataArray;
+  const existing=array.find(x=>String(x.key)===this.idText);this.diff.element_id=existing?.key??this.idText;
+  let expected:any=this.expectedText;try{expected=JSON.parse(this.expectedText);}catch{}if(['text','loc','category','figure','size'].includes(this.diff.property))expected=this.expectedText;
+  this.diff.expected_value=expected;this.diff.predicted_value=this.editingId?this.diff.predicted_value:this.diff.property==='$object'?existing??null:existing?.[this.diff.property]??null;
+  let next=clone(d);if(this.applyNow){if(!this.store.settings().validator.trim())throw Error('Renseignez le nom du validateur dans les paramètres.');next=addRevision(next,applyDifference(next.corrected!,this.diff),this.store.settings().validator,'Correction '+this.diff.error_type+' / '+this.diff.element_id);this.diff.validated=true;this.diff.validated_by=this.store.settings().validator;this.diff.validated_at=new Date().toISOString();}
+  next.pdf=d.pdf;next.differences=this.editingId?next.differences.map(x=>x.id===this.editingId?clone(this.diff):x):[...next.differences,clone(this.diff)];next.status='review';await this.store.put(next);this.dialog=false;this.message=this.applyNow?'Correction appliquée et ajoutée au dataset.':'Écart enregistré, en attente de validation.';
+ });}
+ nextDiff(){const all=(this.current()?.differences??[]).filter(x=>!x.validated);if(!all.length){this.message='Aucun écart ouvert.';return;}const i=all.findIndex(x=>x.element_id===this.selected()?.key);this.editDiff(all[(i+1)%all.length]);}
+ async referenceInput(e:Event){const input=e.target as HTMLInputElement;const f=input.files?.[0];input.value='';if(!f)return;await this.run(async()=>{if(f.size>50*1024*1024)throw Error('Référence limitée à 50 Mo.');const d=this.current();if(!d?.original)throw Error('Importez d’abord un JSON prédit.');const r=parseGraph(await f.text());await this.store.put({...d,reference:r});this.message='Référence chargée. Lancez la comparaison pour générer les écarts.';});}
+ async compare(){await this.run(async()=>{const d=this.current();if(!d?.reference||!d.original)throw Error('Chargez un JSON de référence validé.');const diffs=compareGraphs(d.original,d.reference);const known=new Set(d.differences.map(x=>JSON.stringify([x.element_type,x.element_id,x.property,x.expected_value])));const fresh=diffs.filter(x=>!known.has(JSON.stringify([x.element_type,x.element_id,x.property,x.expected_value])));await this.store.put({...d,differences:[...d.differences,...fresh],status:'review'});this.message=`${fresh.length} nouveaux écarts détectés par rapport au JSON de référence.`;});}
+ scores(){const d=this.current();return d?.original&&d.reference?referenceMetrics(d.original,d.reference):null;}
+ async exportReport(format:string){await this.run(async()=>{const d=this.current();if(!d)throw Error('Sélectionnez un document.');if(format==='pdf')download(await reportPdf(d),d.name+'-report.pdf');else download(JSON.stringify(reportData(d),null,2),d.name+'-report.json');this.message='Rapport téléchargé.';});}
+ async exportBatch(){await this.run(async()=>{await batchExport(this.store.documents(),n=>this.message=`Rapports générés : ${n} / ${this.store.documents().length}`);this.message='Archive des rapports téléchargée.';});}
+ async exportDataset(){await this.run(async()=>{await datasetExport(this.store.documents(),this.exportFormat);this.message='Dataset exporté ; seuls les écarts validés figurent dans les exemples d’apprentissage.';});}
+ exportCorrected(){const d=this.current();if(d?.corrected)download(JSON.stringify(d.corrected,null,2),d.name+'-corrected.json');}
+ async pair(){await this.run(async()=>{await this.store.pair(this.pairSource,this.pairTarget);this.pairSource='';this.pairTarget='';this.message='Association PDF / JSON enregistrée.';});}
+ async remove(d:DocumentRecord){if(!confirm('Supprimer localement '+d.name+' et ses annotations ? Exportez votre dataset ZIP pour garder une copie.'))return;await this.run(async()=>{await this.store.remove(d.id);if(this.activeId()===d.id)this.activeId.set(this.store.documents()[0]?.id??'');});}
+ async saveSettings(){await this.run(async()=>{if(!this.settings.project.trim()||!this.settings.validator.trim())throw Error('Le projet et le validateur sont requis.');await this.store.configure(this.settings);this.message='Paramètres enregistrés. Rechargez la page après changement de clé GoJS.';});}
+ async restore(r:number){if(!confirm('Créer une nouvelle version à partir de cette révision ?'))return;await this.run(async()=>{const d=this.current()!;await this.store.put(addRevision(d,d.revisions[r].graph,this.store.settings().validator,'Restauration de la version '+(r+1)));this.message='Version restaurée ; historique conservé.';});}
+ counts(category:string){return this.store.documents().reduce((n,d)=>n+d.differences.filter(x=>x.category===category).length,0);}
+ allDifferences(){return this.store.documents().flatMap(d=>d.differences);}
+ print(){window.print();}
+}

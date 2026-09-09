@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.angular/
+test-results/
+playwright-report/
+*.log
+.env*
+datasets/
+reports/

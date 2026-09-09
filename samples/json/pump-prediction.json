@@ -1,0 +1,98 @@
+{
+  "class": "GraphLinksModel",
+  "linkKeyProperty": "key",
+  "nodeDataArray": [
+    {
+      "key": "N1",
+      "text": "Start",
+      "category": "start",
+      "loc": "120 35"
+    },
+    {
+      "key": "N2",
+      "text": "Check pump status",
+      "category": "process",
+      "loc": "120 115"
+    },
+    {
+      "key": "N3",
+      "text": "Is pump running?",
+      "category": "decision",
+      "loc": "120 205"
+    },
+    {
+      "key": "N4",
+      "text": "Continue operation",
+      "category": "process",
+      "loc": "340 205"
+    },
+    {
+      "key": "N17",
+      "text": "Purnp Failu re",
+      "category": "process",
+      "loc": "120 300"
+    },
+    {
+      "key": "N20",
+      "text": "Repair pump",
+      "category": "process",
+      "loc": "120 380"
+    },
+    {
+      "key": "N22",
+      "text": "Test pump",
+      "category": "process",
+      "loc": "120 460"
+    },
+    {
+      "key": "N8",
+      "text": "End",
+      "category": "end",
+      "loc": "120 540"
+    }
+  ],
+  "linkDataArray": [
+    {
+      "key": "L1",
+      "from": "N1",
+      "to": "N2"
+    },
+    {
+      "key": "L2",
+      "from": "N2",
+      "to": "N3"
+    },
+    {
+      "key": "L3",
+      "from": "N3",
+      "to": "N4",
+      "text": "Yes"
+    },
+    {
+      "key": "L4",
+      "from": "N3",
+      "to": "N17",
+      "text": "No"
+    },
+    {
+      "key": "L5",
+      "from": "N17",
+      "to": "N20"
+    },
+    {
+      "key": "L6",
+      "from": "N20",
+      "to": "N22"
+    },
+    {
+      "key": "L7",
+      "from": "N4",
+      "to": "N22"
+    },
+    {
+      "key": "L8",
+      "from": "N22",
+      "to": "N8"
+    }
+  ]
+}
