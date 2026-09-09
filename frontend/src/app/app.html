@@ -2,7 +2,7 @@
 <div class="app-shell"><aside class="navigation"><nav aria-label="Navigation principale">@for(item of nav;track item[0]){<button [class.active]="page===item[0]" (click)="navigate(item[0])"><span>{{item[1]}}</span>{{item[2]}}</button>}</nav><div class="nav-summary"><small>PROJET LOCAL</small><strong>{{store.settings().project}}</strong><progress [value]="totals().valid" [max]="totals().documents||1"></progress><small>{{totals().valid}} / {{totals().documents}} documents validés</small><small>Enregistré dans ce navigateur</small></div></aside>
 <main [attr.aria-busy]="busy">
 <input #files hidden type="file" accept=".pdf,.json" multiple (change)="importInput($event)"><input #folder hidden type="file" webkitdirectory multiple (change)="importInput($event)"><input #reference hidden type="file" accept=".json" (change)="referenceInput($event)">
-@if(message){<div class="notification" role="status">{{message}}<button (click)="message=''" aria-label="Fermer notification">×</button></div>}
+@if(message){<div class="notification" role="status"><span>{{message}}</span><button (click)="message=''" aria-label="Fermer notification">×</button></div>}
 @if(errors.length){<div class="error-banner" role="alert">@for(error of errors;track $index){<div>{{error}}</div>}<button (click)="errors=[]">Fermer</button></div>}
 @if(busy){<div class="busy" role="status"><span></span> Traitement en cours…</div>}
 @if(page==='workspace'){

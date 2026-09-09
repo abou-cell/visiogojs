@@ -7,7 +7,7 @@ export interface Difference {
  comment: string; created_at: string; validated_at?: string; validated_by?: string;
  source: 'human'|'reference';
 }
-export interface Revision {version:number; date:string; author:string; reason:string; graph:Graph;}
+export interface Revision {version:number; date:string; author:string; reason:string; graph:Graph; differences?:Difference[];}
 export interface DocumentRecord {
  id:string; name:string; jsonName?:string; pdfName?:string; pdf?:Blob;
  original?:Graph; corrected?:Graph; reference?:Graph; rawOriginal?:string;
@@ -50,8 +50,9 @@ export function makeDocument(name:string,settings:Settings):DocumentRecord {
  const now=new Date().toISOString();return {id:crypto.randomUUID(),name,status:'review',differences:[],revisions:[],modelVersion:settings.modelVersion,datasetVersion:settings.datasetVersion,createdAt:now,updatedAt:now};
 }
 export function addRevision(d:DocumentRecord,g:Graph,author:string,reason:string):DocumentRecord {
- const now=new Date().toISOString();return {...d,corrected:clone(g),status:'review',updatedAt:now,revisions:[...d.revisions,{version:d.revisions.length+1,date:now,author,reason,graph:clone(g)}]};
+ const now=new Date().toISOString();const differences=d.differences.map(x=>{if(!x.validated||satisfies(g,x))return clone(x);const next={...clone(x),validated:false};delete next.validated_at;delete next.validated_by;return next;});return {...d,corrected:clone(g),differences,status:'review',updatedAt:now,revisions:[...d.revisions,{version:d.revisions.length+1,date:now,author,reason,graph:clone(g),differences:clone(differences)}]};
 }
+function satisfies(g:Graph,d:Difference){const list=d.element_type==='node'?g.nodeDataArray:g.linkDataArray;const n=list.find(x=>keyEqual(x.key,d.element_id));if(d.property==='$object')return d.error_type.startsWith('extra_')?!n:!!n&&Object.entries(d.expected_value??{}).every(([k,v])=>JSON.stringify(n[k])===JSON.stringify(v));return !!n&&JSON.stringify(n[d.property]??null)===JSON.stringify(d.expected_value);}
 export function applyDifference(graph:Graph,d:Difference):Graph {
  const g=clone(graph);const list=d.element_type==='node'?g.nodeDataArray:g.linkDataArray;
  const idx=list.findIndex(x=>keyEqual(x.key,d.element_id));

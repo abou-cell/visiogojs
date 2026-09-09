@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
+test.afterEach(async({page},info)=>{if(info.status!==info.expectedStatus)console.log('UI state:',await page.locator('body').innerText());});
 test('PDF + GoJS + JSON, correction, persistence and exports',async({page})=>{
- const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+ const errors:string[]=[];page.on('pageerror',e=>{errors.push(e.message);console.log('Browser error:',e.message);});
  await page.goto('/');await page.getByRole('button',{name:'Charger l’exemple',exact:true}).click();
  await expect(page.getByRole('cell',{name:'wrong_text',exact:true})).toBeVisible();
  await expect(page.locator('pdf-view canvas')).toBeVisible();
@@ -15,6 +16,18 @@ test('PDF + GoJS + JSON, correction, persistence and exports',async({page})=>{
  await page.getByLabel('Format dataset').selectOption('jsonl');const dl2=page.waitForEvent('download');await page.getByRole('button',{name:'Exporter ↓',exact:true}).click();expect((await dl2).suggestedFilename()).toBe('training_dataset.jsonl');
  await page.getByRole('button',{name:'Rapports',exact:false}).first().click();const dl3=page.waitForEvent('download');await page.getByRole('button',{name:'PDF ↓',exact:true}).click();expect((await dl3).suggestedFilename()).toContain('report.pdf');
  expect(errors).toEqual([]);
+});
+test('Batch import, manual PDF pairing, JSON editing and archive export',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:'Charger l’exemple',exact:true}).click();
+ await page.locator('input[type=file]').first().setInputFiles({name:'second.json',mimeType:'application/json',buffer:Buffer.from('{"nodeDataArray":[{"key":"A","text":"Start"}],"linkDataArray":[]}')});
+ await page.getByRole('button',{name:'Traitement batch',exact:false}).first().click();
+ await page.getByLabel('PDF source').selectOption({label:'pump.pdf'});await page.getByLabel('Document cible sans PDF').selectOption({label:'second'});await page.getByRole('button',{name:'Associer',exact:true}).click();
+ await expect(page.getByText('Association PDF / JSON enregistrée.',{exact:true})).toBeVisible();
+ await page.getByRole('row').filter({hasText:'second'}).getByRole('button',{name:'Ouvrir',exact:true}).click();
+ await expect(page.locator('pdf-view canvas')).toBeVisible();
+ const editor=page.locator('.cm-content');await editor.click();await page.keyboard.press('ControlOrMeta+a');await page.keyboard.insertText('{"nodeDataArray":[{"key":"A","text":"Edited"}],"linkDataArray":[]}');await page.getByRole('button',{name:'Appliquer',exact:true}).click();
+ await expect(page.getByText('JSON appliqué ; prédiction originale conservée.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Dataset ML',exact:false}).first().click();await page.getByLabel('Format dataset').selectOption('zip');const dl=page.waitForEvent('download');await page.getByRole('button',{name:'Exporter ↓',exact:true}).click();expect((await dl).suggestedFilename()).toBe('training_dataset.zip');
 });
 test('Invalid JSON import surfaces errors without destroying existing project',async({page})=>{
  await page.goto('/');await page.locator('input[type=file]').first().setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{"nodeDataArray":[],"linkDataArray":[{"from":"missing","to":"missing"}]}')});

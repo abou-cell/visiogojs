@@ -24,3 +24,7 @@ test('Metrics penalize extra objects and represent empty denominator as null',()
 });
 test('CSV preserves multiline strings and neutralizes spreadsheet formulas',()=>{const out=csv([{text:'=HYPERLINK("x")',comment:'a\nb'}]);assert.ok(out.includes("'=HYPERLINK"));assert.ok(out.includes('"a\nb"'));});
 test('Prototype and key mutation are rejected',()=>{const ref=clone(demoGraph);ref.nodeDataArray[0].text='Other';const d=compareGraphs(demoGraph,ref)[0];d.property='__proto__';assert.throws(()=>applyDifference(demoGraph,d),/non modifiable/);});
+test('Restoring an older graph reopens conflicting validated corrections',()=>{
+ const ref=clone(demoGraph);ref.nodeDataArray[0].text='Changed';const d=makeDocument('test',settings);d.original=clone(demoGraph);d.corrected=ref;d.differences=compareGraphs(demoGraph,ref);d.differences[0].validated=true;d.differences[0].validated_by='Expert';
+ const restored=addRevision(d,demoGraph,'Expert','Restore');assert.equal(restored.differences[0].validated,false);assert.equal(restored.status,'review');assert.equal(trainingRows(restored).length,0);assert.equal(d.differences[0].validated,true);
+});
